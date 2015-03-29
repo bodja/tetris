@@ -152,7 +152,10 @@ class Game(object):
         self.win.nodelay(1)
         # game speed
         # TODO: make possible to customize game speed
-        self.win.timeout(100)
+        self.win.timeout(150)
+        self.refresh_border()
+
+    def refresh_border(self):
         self.win.border('*', '*', ' ', '*', ' ', ' ', '*', '*')
 
     def create_block(self):
@@ -241,6 +244,7 @@ class Game(object):
         Run game
         """
         while True:
+            self.refresh_border()
             key = self.win.getch()
             # exit on esc pressed
             if key == 27:
