@@ -10,7 +10,7 @@ class Brick(object):
     Args:
         x, y (int): position at the game board
     """
-    char = '$'
+    char = 'X'
 
     def __init__(self, x, y):
         self.x = x
@@ -201,25 +201,25 @@ class Game(object):
         # move cursor to the top and add missed line
         self.win.move(self.border_size, self.border_size)
         self.win.insertln()
+        # refresh border
         self.draw_border()
         # remove deleted bricks from building map
         for x in range(self.border_size, self.width + 1):
             del self.building[(x, y)]
-        # now we have to recalculate bricks axes
-        self.move_all_down(y)
+            # now we have to recalculate bricks axes
+            self.move_bricks_down(x, y)
 
-    def move_all_down(self, from_y):
+    def move_bricks_down(self, from_x, from_y):
         """
         Visually bricks are moved down, but they may still have old axes
         need to update them
         """
-        for x in range(self.border_size, self.width + 1):
-            for y in reversed(range(self.border_size, from_y + 1)):
-                if (x, y) in self.building:
-                    block = self.building[x, y]
-                    del self.building[x, y]
-                    block.move(*self.directions['down'])
-                    self.building[x, y + 1] = block
+        for y in reversed(range(self.border_size, from_y + 1)):
+            if (from_x, y) in self.building:
+                brick = self.building[from_x, y]
+                del self.building[from_x, y]
+                brick.move(*self.directions['down'])
+                self.building[from_x, y + 1] = brick
 
     def row_is_completed(self, y):
         for x in range(self.border_size, self.width + 1):
@@ -231,9 +231,13 @@ class Game(object):
         for brick in self.current_block.bricks:
             self.win.addch(brick.y, brick.x, brick.char)
 
-    def undraw_block(self):
+    def redraw_block(self, action, *args):
+        # clear block
         for brick in self.current_block.bricks:
             self.win.addch(brick.y, brick.x, 32)
+        # move or rotate
+        getattr(self.current_block, action)(*args)
+        self.draw_block()
 
     def do_move(self, key):
         """
@@ -242,13 +246,10 @@ class Game(object):
         if key in self.directions:
             dx, dy = self.directions[key]
             if self.current_block.can_move(self, dx, dy):
-                self.undraw_block()
-                self.current_block.move(dx, dy)
-                self.draw_block()
-
+                self.redraw_block('move', dx, dy)
             elif key == 'down':
                 # create new block if current block can't move and it's
-                # directions is down
+                # directions is "down"
                 self.update_building()
                 self.create_block()
                 # if now way to move current block it's a game over
@@ -258,9 +259,7 @@ class Game(object):
         elif key in self.rotate_directions:
             direction = self.rotate_directions[key]
             if self.current_block.can_rotate(self, direction):
-                self.undraw_block()
-                self.current_block.rotate(direction)
-                self.draw_block()
+                self.redraw_block('rotate', direction)
 
     def mainloop(self):
         while not self.mainloop_thread.stopped():
