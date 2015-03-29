@@ -1,5 +1,7 @@
+import time
 import curses
 import random
+import threading
 
 
 class Brick(object):
@@ -33,10 +35,18 @@ class Brick(object):
         """
         x = self.x + dx
         y = self.y + dy
-        if x in range(game.border_size, game.width + 1) and y in range(game.height + 1)\
+        if x in range(game.border_size, game.width + 1) \
+                and y in range(game.height + 1) \
                 and (x, y) not in game.building:
             return True
         return False
+
+    def get_rotation_coords(self, direction, center):
+        x = self.x - center.x
+        y = self.y - center.y
+        dx = - direction * y - x
+        dy = direction * x - y
+        return dx, dy
 
 
 class Block(object):
@@ -47,11 +57,13 @@ class Block(object):
     Hint:
         Block.init_coordinates is required should be implemented
     """
+    center_brick_index = 1
+
     def __init__(self, center_x, center_y):
         self.bricks = []
         for position in self.init_coordinates(center_x, center_y):
             self.bricks.append(Brick(*position))
-        self.center = self.bricks[2]
+        self.center = self.bricks[self.center_brick_index]
 
     @classmethod
     def init_coordinates(self, center_x, center_y):
@@ -59,24 +71,6 @@ class Block(object):
         Define figure in here. See child classes below.
         """
         raise NotImplementedError
-
-    def rotate(self, direction):
-        """
-        Rotate block around it's central coordinates
-        """
-        for brick in self.bricks:
-            x = brick.x - self.center.x
-            y = brick.y - self.center.y
-            dx = - direction * y - x
-            dy = direction * x - y
-            brick.move(dx, dy)
-
-    def move(self, dx, dy):
-        """
-        Move block on dx, dy step
-        """
-        for brick in self.bricks:
-            brick.move(dx, dy)
 
     def can_move(self, game, dx, dy):
         """
@@ -91,6 +85,13 @@ class Block(object):
                 return False
         return True
 
+    def move(self, dx, dy):
+        """
+        Move block on dx, dy step
+        """
+        for brick in self.bricks:
+            brick.move(dx, dy)
+
     def can_rotate(self, game, direction):
         """
         Args:
@@ -100,13 +101,29 @@ class Block(object):
             True if it can, and False otherwise
         """
         for brick in self.bricks:
-            x = brick.x - self.center.x
-            y = brick.y - self.center.y
-            dx = direction * y - x
-            dy = direction * x - y
+            dx, dy = brick.get_rotation_coords(direction, self.center)
             if not brick.can_move(game, dx, dy):
                 return False
         return True
+
+    def rotate(self, direction):
+        """
+        Rotate block around it's central coordinates
+        """
+        for brick in self.bricks:
+            brick.move(*brick.get_rotation_coords(direction, self.center))
+
+
+class GameThread(threading.Thread):
+    def __init__(self, target):
+        super(GameThread, self).__init__(target=target)
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def stopped(self):
+        return self._stop.isSet()
 
 
 class Game(object):
@@ -125,23 +142,24 @@ class Game(object):
             {key: (x_step, y_step)}
         rotate_directions (dict): map of possible rotation directions
     """
+    win = None
     current_block = None
     border_size = 1
     directions = {curses.KEY_LEFT: (-1, 0),
                   curses.KEY_RIGHT: (1, 0),
-                  -1: (0, 1)}
+                  'down': (0, 1)}
     rotate_directions = {curses.KEY_UP: 1, curses.KEY_DOWN: -1}
 
-    def __init__(self, blocks, width=20, height=20):
+    def __init__(self, blocks, speed=200, width=20, height=20):
         self.blocks = blocks
+        self.speed = speed
         self.building = {}
         self.width = width
         self.height = height
-        self.init_play_garden()
-        self.create_block()
-        self.draw_block()
+        self.init_play_board()
+        self.mainloop_thread = GameThread(target=self.mainloop)
 
-    def init_play_garden(self):
+    def init_play_board(self):
         # initialize
         curses.initscr()
         # hide cursor
@@ -150,13 +168,8 @@ class Game(object):
         self.win = curses.newwin(self.height + 2, self.width + 2)
         self.win.keypad(1)
         self.win.nodelay(1)
-        # game speed
-        # TODO: make possible to customize game speed
-        self.win.timeout(150)
-        self.refresh_border()
-
-    def refresh_border(self):
-        self.win.border('*', '*', ' ', '*', ' ', ' ', '*', '*')
+        self.create_block()
+        self.draw_block()
 
     def create_block(self):
         """
@@ -200,7 +213,7 @@ class Game(object):
                 if (x, y) in self.building:
                     block = self.building[x, y]
                     del self.building[x, y]
-                    block.move(*self.directions[-1])
+                    block.move(*self.directions['down'])
                     self.building[x, y + 1] = block
 
     def row_is_completed(self, y):
@@ -227,10 +240,15 @@ class Game(object):
                 self.undraw_block()
                 self.current_block.move(dx, dy)
                 self.draw_block()
-            elif key == -1:
-                # if no key was pressed we assume that -1 as move down
+
+            elif key == 'down':
+                # create new block if current block can't move and it's
+                # directions is down
                 self.update_building()
                 self.create_block()
+                # if now way to move current block it's a game over
+                if not self.current_block.can_move(self, 0, 0):
+                    self.exit()
 
         elif key in self.rotate_directions:
             direction = self.rotate_directions[key]
@@ -239,24 +257,33 @@ class Game(object):
                 self.current_block.rotate(direction)
                 self.draw_block()
 
-    def run_loop(self):
-        """
-        Run game
-        """
-        while True:
-            self.refresh_border()
+    def mainloop(self):
+        while not self.mainloop_thread.stopped():
+            time.sleep(self.speed / 1000.0)
+            self.do_move('down')
+
+    def listen_key_loop(self):
+        while not self.mainloop_thread.stopped():
+            # refresh border
+            self.win.border('*', '*', ' ', '*', ' ', ' ', '*', '*')
             key = self.win.getch()
             # exit on esc pressed
             if key == 27:
-                break
+                self.exit()
             self.do_move(key)
-            # game over if we cant move on the top
-            if not self.current_block.can_move(self, 0, 0):
-                break
+
+    def exit(self):
+        self.mainloop_thread.stop()
         curses.endwin()
+
+    def start(self):
+        self.mainloop_thread.start()
+        self.listen_key_loop()
 
 
 class IBlock(Block):
+    center_brick_index = 2
+
     @classmethod
     def init_coordinates(cls, center_x, center_y):
         return [[center_x - 2, center_y],
@@ -285,7 +312,7 @@ class JBlock(Block):
 
 class ZBlock(Block):
     @classmethod
-    def init_coordinates(self, center_x, center_y):
+    def init_coordinates(cls, center_x, center_y):
         return [[center_x - 1, center_y],
                 [center_x, center_y],
                 [center_x, center_y + 1],
@@ -293,6 +320,8 @@ class ZBlock(Block):
 
 
 class OBlock(Block):
+    center_brick_index = 0
+
     @classmethod
     def init_coordinates(cls, center_x, center_y):
         return [[center_x, center_y],
@@ -304,5 +333,5 @@ class OBlock(Block):
         return
 
 
-# Init and run game
-Game([IBlock, LBlock, JBlock, ZBlock, OBlock]).run_loop()
+if __name__ == '__main__':
+    Game([IBlock, LBlock, JBlock, ZBlock, OBlock]).start()
