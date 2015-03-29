@@ -168,8 +168,12 @@ class Game(object):
         self.win = curses.newwin(self.height + 2, self.width + 2)
         self.win.keypad(1)
         self.win.nodelay(1)
+        self.draw_border()
         self.create_block()
         self.draw_block()
+
+    def draw_border(self):
+        self.win.border('*', '*', ' ', '*', ' ', ' ', '*', '*')
 
     def create_block(self):
         """
@@ -197,6 +201,7 @@ class Game(object):
         # move cursor to the top and add missed line
         self.win.move(self.border_size, self.border_size)
         self.win.insertln()
+        self.draw_border()
         # remove deleted bricks from building map
         for x in range(self.border_size, self.width + 1):
             del self.building[(x, y)]
@@ -264,8 +269,6 @@ class Game(object):
 
     def listen_key_loop(self):
         while not self.mainloop_thread.stopped():
-            # refresh border
-            self.win.border('*', '*', ' ', '*', ' ', ' ', '*', '*')
             key = self.win.getch()
             # exit on esc pressed
             if key == 27:
