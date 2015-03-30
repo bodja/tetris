@@ -3,7 +3,7 @@ Tetris python
 =============
 
 Run
-===
+----
 
 Open console and type::
 
@@ -11,7 +11,7 @@ Open console and type::
 
 
 Controls:
-=========
+---------
 
 * ESC         - exit
 * UP ARROW    - rotate right

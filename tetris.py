@@ -173,7 +173,7 @@ class Game(object):
         self.draw_block()
 
     def draw_border(self):
-        self.win.border('*', '*', ' ', '*', ' ', ' ', '*', '*')
+        self.win.border(124, 124, 32, 34, 32, 32, 39, 39)
 
     def create_block(self):
         """
